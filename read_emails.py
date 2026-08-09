@@ -1,31 +1,40 @@
 import base64
 import re
+
 from bs4 import BeautifulSoup
-from googleapiclient.discovery import build
 
 from gmail_service import create_gmail_service
 
 
 def decode_body(data):
-    """Decode Gmail's base64url encoded email body."""
+    """Decode Gmail Base64URL encoded data."""
+
     if not data:
         return ""
 
     try:
-        return base64.urlsafe_b64decode(data + "===" ).decode(
+        padding = "=" * (-len(data) % 4)
+
+        return base64.urlsafe_b64decode(
+            data + padding
+        ).decode(
             "utf-8",
             errors="replace"
         )
+
     except Exception:
         return ""
 
 
 def clean_html(html):
-    """Convert HTML email into clean readable text."""
+    """Convert HTML email into readable text."""
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
 
-    # Remove elements that do not contain useful email content
+    # Remove unnecessary HTML
     for tag in soup([
         "script",
         "style",
@@ -38,12 +47,15 @@ def clean_html(html):
         tag.decompose()
 
     # Extract visible text
-    text = soup.get_text(separator="\n")
+    text = soup.get_text(
+        separator="\n"
+    )
 
-    # Clean whitespace
+    # Clean individual lines
     lines = []
 
     for line in text.splitlines():
+
         line = line.strip()
 
         if line:
@@ -52,12 +64,9 @@ def clean_html(html):
     text = "\n".join(lines)
 
     # Remove excessive blank lines
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # Remove very long tracking URLs
     text = re.sub(
-        r"https?://\S+",
-        "[LINK]",
+        r"\n{3,}",
+        "\n\n",
         text
     )
 
@@ -71,58 +80,97 @@ def extract_body(payload):
     Priority:
     1. text/plain
     2. text/html
-    3. recursively search multipart sections
+    3. nested MIME parts
     """
 
-    mime_type = payload.get("mimeType", "")
-    body_data = payload.get("body", {}).get("data")
+    mime_type = payload.get(
+        "mimeType",
+        ""
+    )
 
-    # Direct text/plain body
+    body_data = payload.get(
+        "body",
+        {}
+    ).get(
+        "data"
+    )
+
+    # Direct plain-text body
     if mime_type == "text/plain" and body_data:
-        return decode_body(body_data)
 
-    # Direct text/html body
+        return decode_body(
+            body_data
+        )
+
+    # Direct HTML body
     if mime_type == "text/html" and body_data:
-        html = decode_body(body_data)
-        return clean_html(html)
 
-    # Multipart email
-    parts = payload.get("parts", [])
+        html = decode_body(
+            body_data
+        )
+
+        return clean_html(
+            html
+        )
+
+    parts = payload.get(
+        "parts",
+        []
+    )
 
     plain_text = ""
     html_text = ""
 
     for part in parts:
 
-        part_type = part.get("mimeType", "")
+        part_type = part.get(
+            "mimeType",
+            ""
+        )
 
-        # Direct plain text
-        if part_type == "text/plain":
-            data = part.get("body", {}).get("data")
+        part_data = part.get(
+            "body",
+            {}
+        ).get(
+            "data"
+        )
 
-            if data:
-                plain_text = decode_body(data)
+        # Plain text
+        if part_type == "text/plain" and part_data:
 
-        # Direct HTML
-        elif part_type == "text/html":
-            data = part.get("body", {}).get("data")
+            plain_text = decode_body(
+                part_data
+            )
 
-            if data:
-                html_text = clean_html(decode_body(data))
+        # HTML
+        elif part_type == "text/html" and part_data:
 
-        # Nested multipart
+            html_text = clean_html(
+                decode_body(
+                    part_data
+                )
+            )
+
+        # Nested MIME structure
         elif part.get("parts"):
-            nested_text = extract_body(part)
 
-            if nested_text:
+            nested_body = extract_body(
+                part
+            )
+
+            if nested_body:
+
                 if not plain_text:
-                    plain_text = nested_text
+                    plain_text = nested_body
 
-    # Prefer plain text when available
+    # Prefer plain text
     if plain_text.strip():
+
         return plain_text.strip()
 
+    # Otherwise use cleaned HTML
     if html_text.strip():
+
         return html_text.strip()
 
     return ""
@@ -130,14 +178,30 @@ def extract_body(payload):
 
 def get_header(headers, name):
     """Get a specific email header."""
+
     for header in headers:
-        if header.get("name", "").lower() == name.lower():
-            return header.get("value", "")
+
+        if header.get(
+            "name",
+            ""
+        ).lower() == name.lower():
+
+            return header.get(
+                "value",
+                ""
+            )
 
     return ""
 
 
-def read_emails(max_results=5):
+def get_latest_emails(max_results=5):
+    """
+    Get the latest Gmail messages.
+
+    Returns:
+        service: Gmail API service
+        messages: list of Gmail message IDs
+    """
 
     service = create_gmail_service()
 
@@ -146,45 +210,127 @@ def read_emails(max_results=5):
         maxResults=max_results
     ).execute()
 
-    messages = results.get("messages", [])
+    messages = results.get(
+        "messages",
+        []
+    )
 
-    print(f"Found {len(messages)} emails")
+    return service, messages
 
-    print("=" * 60)
 
-    for message in messages:
+def get_email_details(
+    service,
+    message_id
+):
+    """
+    Retrieve complete information about one email.
 
-        msg = service.users().messages().get(
-            userId="me",
-            id=message["id"],
-            format="full"
-        ).execute()
+    Returns:
+        Dictionary containing:
+        id
+        sender
+        subject
+        date
+        body
+    """
 
-        payload = msg.get("payload", {})
+    message = service.users().messages().get(
+        userId="me",
+        id=message_id,
+        format="full"
+    ).execute()
 
-        headers = payload.get("headers", [])
+    payload = message.get(
+        "payload",
+        {}
+    )
 
-        sender = get_header(headers, "From")
-        subject = get_header(headers, "Subject")
-        date = get_header(headers, "Date")
+    headers = payload.get(
+        "headers",
+        []
+    )
 
-        body = extract_body(payload)
+    email_data = {
+
+        "id": message_id,
+
+        "sender": get_header(
+            headers,
+            "From"
+        ),
+
+        "subject": get_header(
+            headers,
+            "Subject"
+        ),
+
+        "date": get_header(
+            headers,
+            "Date"
+        ),
+
+        "body": extract_body(
+            payload
+        )
+    }
+
+    return email_data
+
+
+# Test the email reader directly
+if __name__ == "__main__":
+
+    service, messages = get_latest_emails(
+        max_results=5
+    )
+
+    print(
+        f"Found {len(messages)} emails\n"
+    )
+
+    for index, message in enumerate(
+        messages,
+        start=1
+    ):
+
+        email = get_email_details(
+            service,
+            message["id"]
+        )
 
         print("=" * 60)
 
-        print(f"Sender: {sender}")
-        print(f"Subject: {subject}")
-        print(f"Date: {date}")
+        print(
+            f"EMAIL {index}"
+        )
+
+        print(
+            "Sender:",
+            email["sender"]
+        )
+
+        print(
+            "Subject:",
+            email["subject"]
+        )
+
+        print(
+            "Date:",
+            email["date"]
+        )
 
         print("\nBody:")
 
-        if body:
-            print(body)
+        if email["body"]:
+
+            print(
+                email["body"][:1000]
+            )
+
         else:
-            print("[No readable body found]")
+
+            print(
+                "[No readable body found]"
+            )
 
         print()
-
-
-if __name__ == "__main__":
-    read_emails(5)
