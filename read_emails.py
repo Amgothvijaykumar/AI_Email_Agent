@@ -334,3 +334,31 @@ if __name__ == "__main__":
             )
 
         print()
+
+        
+
+def search_emails(query, max_results=10):
+    """
+    Search Gmail using Gmail's search syntax.
+
+    Examples:
+        from:indeed
+        subject:job
+        is:unread
+        newer_than:7d
+    """
+
+    service = create_gmail_service()
+
+    results = service.users().messages().list(
+        userId="me",
+        q=query,
+        maxResults=max_results
+    ).execute()
+
+    messages = results.get(
+        "messages",
+        []
+    )
+
+    return service, messages
