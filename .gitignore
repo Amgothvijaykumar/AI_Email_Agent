@@ -1,0 +1,13 @@
+# Virtual environment
+avkve/
+
+# Google OAuth credentials
+credentials.json
+token.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
