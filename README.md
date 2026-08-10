@@ -181,7 +181,13 @@ python gmail_agent.py
 ```
 AIGmailAgent/
 │
-├── gmail_agent.py          # Main agent (Gemini + controlled tool loop)
+├── web_server.py           # FastAPI Web Server (REST API + Static files)
+├── static/                 # Modern Web UI Dashboard
+│   ├── index.html          # SPA HTML (Chat, Inbox, Categorizer, Search)
+│   ├── style.css           # Modern Glassmorphic Dark Design System
+│   └── app.js              # Interactive UI & Execution Logic
+│
+├── gmail_agent.py          # CLI AI Agent (Gemini + controlled tool loop)
 ├── gemini_client.py        # Gemini LLM/embedding factory + key fallback
 │
 ├── gmail_auth.py           # OAuth authentication (run once)
@@ -192,16 +198,9 @@ AIGmailAgent/
 ├── email_indexer.py        # Build/update semantic search index
 ├── semantic_search_tool.py # Semantic email search (Gemini embeddings)
 │
+├── categorize_and_delete.py# CLI Categorizer & Safe Bulk Trash Tool
 ├── email_ai.py             # Single-email AI analysis
 ├── ai_email_agent.py       # Simple batch email analyzer
-│
-├── test_gemini_chat.py     # Test Gemini API connection
-├── test_gemini_tools.py    # Test Gemini tool calling
-├── test_tool.py            # Test search_gmail tool
-├── test_search.py          # Test Gmail search
-├── test_read_tool.py       # Test read_gmail_email tool
-├── test_mark_read.py       # Test mark_email_as_read tool
-├── test_semantic_tool.py   # Test semantic search
 │
 ├── .env.example            # Environment variable template
 ├── .gitignore              # Excludes credentials, .env, embeddings
@@ -217,7 +216,7 @@ AIGmailAgent/
 |---------|-------------|
 | **Duplicate detection** | Stops if Gemini calls the same tool with same args twice |
 | **Message ID validation** | Rejects non-hex strings as message IDs (prevents hallucinated IDs) |
-| **Delete confirmation** | Always asks user to confirm before any deletion |
+| **Delete confirmation** | Always asks user to confirm before any deletion (both in UI and CLI) |
 | **Max iterations** | Hard cap of 5 tool calls per request |
 | **Key + model fallback** | On quota errors, tries next model then next key |
 | **No hardcoded secrets** | All keys in `.env`, never in source code |
@@ -229,7 +228,7 @@ AIGmailAgent/
 | Purpose | Model |
 |---------|-------|
 | LLM / Agent | `gemini-flash-latest` (primary) with fallbacks |
-| Embeddings | `text-embedding-004` (768-dim) |
+| Embeddings | `models/gemini-embedding-001` (3072-dim) |
 
 **Model fallback chain:**
 `gemini-flash-latest` → `gemini-3.5-flash` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest`
