@@ -7,10 +7,7 @@ from langchain_core.messages import (
     ToolMessage
 )
 
-from gmail_tools import (
-    search_gmail,
-    read_gmail_email
-)
+from gmail_tools import search_gmail, read_gmail_email, mark_email_as_read
 
 
 # --------------------------------------------------
@@ -42,7 +39,8 @@ llm = ChatGoogleGenerativeAI(
 
 tools = [
     search_gmail,
-    read_gmail_email
+    read_gmail_email,
+    mark_email_as_read
 ]
 
 llm_with_tools = llm.bind_tools(tools)
@@ -228,6 +226,21 @@ Follow these rules carefully:
 
 40. Keep the digest concise and useful rather than reproducing
     complete email bodies.
+
+41. You may use mark_email_as_read when the user explicitly
+    asks to mark an email as read.
+
+42. Before modifying an email, identify the exact Gmail
+    message ID using search_gmail.
+
+43. Never use a subject, sender, or human-readable name as
+    the message_id.
+
+44. The message_id must be the exact Gmail message ID returned
+    by search_gmail.
+
+45. Do not mark emails as read automatically unless the user
+    explicitly requests it.
 """
     )
 ]

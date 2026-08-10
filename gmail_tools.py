@@ -92,3 +92,30 @@ Date: {email["date"]}
 Body:
 {email["body"]}
 """
+
+
+
+@tool
+def mark_email_as_read(message_id: str) -> str:
+    """
+    Mark a specific Gmail email as read.
+
+    The message_id must be the exact Gmail message ID
+    returned by search_gmail.
+
+    This action modifies the email.
+    """
+    service, _ = search_emails(
+        "in:anywhere",
+        max_results=1
+    )
+
+    service.users().messages().modify(
+        userId="me",
+        id=message_id,
+        body={
+            "removeLabelIds": ["UNREAD"]
+        }
+    ).execute()
+
+    return f"Email {message_id} has been marked as read."
