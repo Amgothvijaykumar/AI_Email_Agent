@@ -352,19 +352,21 @@ def execute_delete_email(service, message_id: str) -> str:
 @tool
 def get_inbox_overview() -> str:
     """
-    Get a quick overview of the inbox: unread count, recent senders,
-    and a list of the latest emails.
+    Get a quick overview of the inbox: unread count, today's emails
+    with previews, and the latest 10 inbox emails.
 
     Use this when the user asks for:
     - "Give me an inbox overview"
     - "Summarize my inbox"
     - "What's in my inbox?"
     - "Give me today's email digest"
+    - "Categorize today's emails"
+    - "What emails did I get today?"
     """
     service = _get_service()
 
     try:
-        # Get total unread count
+        # Get account info
         profile = service.users().getProfile(userId="me").execute()
 
         unread_result = service.users().messages().list(
@@ -372,35 +374,63 @@ def get_inbox_overview() -> str:
             labelIds=["INBOX", "UNREAD"],
             maxResults=1,
         ).execute()
-
         unread_est = unread_result.get("resultSizeEstimate", 0)
 
-        # Get latest 10 inbox emails
+        # ---- Today's emails (last 24 hours) ----
+        today_result = service.users().messages().list(
+            userId="me",
+            labelIds=["INBOX"],
+            q="newer_than:1d",
+            maxResults=20,
+        ).execute()
+
+        today_messages = today_result.get("messages", [])
+        today_list = []
+
+        for msg in today_messages:
+            email = get_email_details(service, msg["id"])
+            preview = email.get("body", "")[:200].replace("\n", " ").strip()
+            today_list.append(
+                f"• [{msg['id']}] {email['subject']}\n"
+                f"  From: {email['sender']}\n"
+                f"  Date: {email['date']}\n"
+                f"  Preview: {preview}"
+            )
+
+        # ---- Latest 10 inbox emails (for general context) ----
         inbox_result = service.users().messages().list(
             userId="me",
             labelIds=["INBOX"],
             maxResults=10,
         ).execute()
 
-        messages = inbox_result.get("messages", [])
+        latest_messages = inbox_result.get("messages", [])
+        latest_list = []
 
-        email_list = []
-
-        for msg in messages:
+        for msg in latest_messages:
             email = get_email_details(service, msg["id"])
-            email_list.append(
+            latest_list.append(
                 f"• [{msg['id']}] {email['subject']}\n"
                 f"  From: {email['sender']}\n"
                 f"  Date: {email['date']}"
             )
+
+        today_section = (
+            f"📅 Today's Emails ({len(today_list)}):\n\n"
+            + "\n\n".join(today_list)
+            if today_list
+            else "📅 No emails from today."
+        )
 
         overview = (
             f"📬 Inbox Overview\n"
             f"{'=' * 50}\n"
             f"Account: {profile.get('emailAddress', 'N/A')}\n"
             f"Estimated unread: {unread_est}\n\n"
-            f"Latest 10 emails:\n\n"
-            + "\n\n".join(email_list)
+            f"{today_section}\n\n"
+            f"{'=' * 50}\n"
+            f"Latest 10 inbox emails:\n\n"
+            + "\n\n".join(latest_list)
         )
 
         return overview
