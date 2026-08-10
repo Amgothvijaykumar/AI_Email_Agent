@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Gmail Agent — Intelligent Inbox Copilot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Background Glow Effects -->
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+
+    <div class="app-container">
+        <!-- TOP HEADER -->
+        <header class="app-header">
+            <div class="header-left">
+                <div class="logo-mark">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 6L12 13L2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6Z"/>
+                        <path d="M22 6L12 13L2 6"/>
+                    </svg>
+                </div>
+                <div class="brand-title">
+                    <h1>AI Gmail Copilot</h1>
+                    <span class="version-badge">Gemini 3.6 Flash</span>
+                </div>
+            </div>
+
+            <!-- Header Navigation Tabs -->
+            <nav class="nav-tabs">
+                <button class="nav-tab active" data-tab="chat">
+                    <span class="tab-icon">💬</span>
+                    <span>AI Agent</span>
+                </button>
+                <button class="nav-tab" data-tab="inbox">
+                    <span class="tab-icon">📥</span>
+                    <span>Smart Inbox</span>
+                    <span class="badge" id="headerUnreadBadge">...</span>
+                </button>
+                <button class="nav-tab" data-tab="categorize">
+                    <span class="tab-icon">🏷️</span>
+                    <span>Categorizer</span>
+                </button>
+                <button class="nav-tab" data-tab="semantic">
+                    <span class="tab-icon">🔍</span>
+                    <span>Semantic Search</span>
+                </button>
+            </nav>
+
+            <!-- Account & Status info -->
+            <div class="header-right">
+                <div class="status-pill" id="statusPill">
+                    <span class="status-dot"></span>
+                    <span id="accountEmail">Connecting...</span>
+                </div>
+                <button class="btn-icon" id="btnRefreshStatus" title="Refresh Account Status">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN VIEW CONTENT -->
+        <main class="main-content">
+            
+            <!-- ============================================== -->
+            <!-- TAB 1: AI AGENT CHAT & TOOL EXECUTION CONSOLE   -->
+            <!-- ============================================== -->
+            <section class="tab-panel active" id="panel-chat">
+                <div class="chat-layout">
+                    <!-- Chat Message Area -->
+                    <div class="chat-messages" id="chatMessages">
+                        <!-- Welcome message -->
+                        <div class="message-row system-intro">
+                            <div class="agent-avatar">🤖</div>
+                            <div class="message-bubble intro-bubble">
+                                <h3>Welcome to your AI Gmail Copilot!</h3>
+                                <p>I'm connected to your Gmail account and powered by Gemini. You can ask me to search, summarize, categorize, read, star, archive, or safely trash emails in natural language.</p>
+                                
+                                <div class="quick-prompts-label">Try one of these requests:</div>
+                                <div class="quick-prompt-chips">
+                                    <button class="prompt-chip" onclick="sendPrompt('Show my unread emails')">📩 Show unread emails</button>
+                                    <button class="prompt-chip" onclick="sendPrompt('Give me an inbox overview with today\'s emails')">📬 Inbox Overview</button>
+                                    <button class="prompt-chip" onclick="sendPrompt('Find emails from Indeed about Python developer jobs')">💼 Python jobs from Indeed</button>
+                                    <button class="prompt-chip" onclick="sendPrompt('Find emails related to Adobe hackathon')">🏆 Adobe Hackathon emails</button>
+                                    <button class="prompt-chip" onclick="sendPrompt('Categorize today\'s emails and highlight important ones')">🏷️ Categorize today's emails</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Input Bar -->
+                    <div class="chat-input-wrapper">
+                        <div class="input-container">
+                            <input 
+                                type="text" 
+                                id="chatInput" 
+                                placeholder="Ask your Gmail agent (e.g., 'Find emails from Indeed', 'Delete test email')..." 
+                                autocomplete="off"
+                            />
+                            <button class="btn-send" id="btnSend">
+                                <span>Send</span>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="chat-hints">
+                            <span>💡 Gemini Agent executes tools autonomously & asks for confirmation before any deletion.</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- TAB 2: SMART INBOX & EMAIL VIEWER               -->
+            <!-- ============================================== -->
+            <section class="tab-panel" id="panel-inbox">
+                <div class="inbox-layout">
+                    <!-- Inbox Sidebar Filters -->
+                    <aside class="inbox-sidebar">
+                        <div class="sidebar-section">
+                            <div class="sidebar-title">Filters</div>
+                            <button class="filter-btn active" data-query="label:INBOX">
+                                <span class="filter-icon">📥</span>
+                                <span class="filter-name">Inbox</span>
+                            </button>
+                            <button class="filter-btn" data-query="is:unread label:INBOX">
+                                <span class="filter-icon">✉️</span>
+                                <span class="filter-name">Unread</span>
+                            </button>
+                            <button class="filter-btn" data-query="is:starred">
+                                <span class="filter-icon">⭐</span>
+                                <span class="filter-name">Starred</span>
+                            </button>
+                            <button class="filter-btn" data-query="newer_than:1d">
+                                <span class="filter-icon">📅</span>
+                                <span class="filter-name">Today</span>
+                            </button>
+                            <button class="filter-btn" data-query="from:indeed">
+                                <span class="filter-icon">💼</span>
+                                <span class="filter-name">Indeed Jobs</span>
+                            </button>
+                        </div>
+
+                        <div class="sidebar-section quick-stats-box">
+                            <div class="stat-item">
+                                <span class="stat-label">Estimated Unread</span>
+                                <span class="stat-value" id="statUnreadCount">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Vector Embeddings</span>
+                                <span class="stat-value" id="statIndexedCount">-</span>
+                            </div>
+                        </div>
+                    </aside>
+
+                    <!-- Inbox List View -->
+                    <div class="inbox-main">
+                        <div class="inbox-toolbar">
+                            <div class="search-box">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="inboxSearchInput" placeholder="Filter emails (e.g. from:indeed, is:unread, subject:test)...">
+                            </div>
+                            <button class="btn-secondary" id="btnRefreshInbox">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                <span>Refresh</span>
+                            </button>
+                        </div>
+
+                        <!-- Email Cards Container -->
+                        <div class="email-list" id="emailListContainer">
+                            <div class="loading-state">
+                                <div class="spinner"></div>
+                                <p>Fetching inbox emails...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- TAB 3: GEMINI CATEGORIZER & BULK CLEANER        -->
+            <!-- ============================================== -->
+            <section class="tab-panel" id="panel-categorize">
+                <div class="categorize-layout">
+                    <div class="categorize-header">
+                        <div class="categorize-title">
+                            <h2>Smart Email Categorizer & Cleaner</h2>
+                            <p>Gemini analyzes recent emails, groups them by intent, and lets you bulk clean clutter safely.</p>
+                        </div>
+                        <div class="categorize-actions">
+                            <button class="btn-primary" id="btnRunCategorizer">
+                                <span>⚡ Categorize Today's Emails</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Category Overview Grid -->
+                    <div class="category-grid" id="categoryGridContainer">
+                        <div class="empty-state-card">
+                            <span class="empty-icon">🏷️</span>
+                            <h3>No Active Analysis</h3>
+                            <p>Click "Categorize Today's Emails" to run Gemini's intelligent categorization on your inbox.</p>
+                        </div>
+                    </div>
+
+                    <!-- Bulk Action Floating Bar -->
+                    <div class="bulk-action-bar" id="bulkActionBar" style="display: none;">
+                        <div class="bulk-info">
+                            <span class="bulk-count" id="bulkSelectedCount">0</span> emails selected for cleanup
+                        </div>
+                        <div class="bulk-buttons">
+                            <button class="btn-secondary" id="btnBulkDeselect">Deselect All</button>
+                            <button class="btn-danger" id="btnBulkTrash">
+                                <span>🗑️ Move Selected to Trash</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- TAB 4: SEMANTIC VECTOR SEARCH STUDIO            -->
+            <!-- ============================================== -->
+            <section class="tab-panel" id="panel-semantic">
+                <div class="semantic-layout">
+                    <div class="semantic-header">
+                        <div class="semantic-title">
+                            <h2>Vector Similarity Search</h2>
+                            <p>Search your emails by meaning and intent using 3072-dimensional Gemini embeddings.</p>
+                        </div>
+                        <div class="semantic-controls">
+                            <div class="index-meta-pill">
+                                <span class="meta-label">Indexed:</span>
+                                <span class="meta-val" id="semanticIndexCount">50</span>
+                                <span class="meta-model">(models/gemini-embedding-001)</span>
+                            </div>
+                            <button class="btn-secondary" id="btnReindex">
+                                <span>🔄 Sync Index</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Semantic Search Bar -->
+                    <div class="semantic-search-box">
+                        <input 
+                            type="text" 
+                            id="semanticSearchInput" 
+                            placeholder="Enter a concept (e.g. 'Python developer jobs', 'Hackathons and competitions', 'Security alerts')..."
+                        />
+                        <button class="btn-primary" id="btnRunSemanticSearch">
+                            <span>Search Meanings</span>
+                        </button>
+                    </div>
+
+                    <div class="semantic-query-examples">
+                        <span>Try:</span>
+                        <button class="chip-sm" onclick="runSemanticQuery('Adobe hackathon opportunities')">Adobe hackathon</button>
+                        <button class="chip-sm" onclick="runSemanticQuery('Python developer jobs')">Python developer jobs</button>
+                        <button class="chip-sm" onclick="runSemanticQuery('AI engineer remote roles')">AI engineer remote roles</button>
+                        <button class="chip-sm" onclick="runSemanticQuery('Financial summaries and account statements')">Financial summaries</button>
+                    </div>
+
+                    <!-- Semantic Results -->
+                    <div class="semantic-results" id="semanticResultsContainer">
+                        <div class="empty-state-card">
+                            <span class="empty-icon">🧠</span>
+                            <h3>Enter a natural query above</h3>
+                            <p>Vector search calculates cosine similarity against your indexed emails.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- SLIDING EMAIL READER DRAWER                     -->
+    <!-- ============================================== -->
+    <div class="reader-drawer-overlay" id="readerDrawerOverlay"></div>
+    <div class="reader-drawer" id="readerDrawer">
+        <div class="drawer-header">
+            <div class="drawer-actions">
+                <button class="drawer-btn" id="drawerStarBtn" title="Star email">⭐ Star</button>
+                <button class="drawer-btn" id="drawerReadBtn" title="Toggle read status">✉️ Mark Unread</button>
+                <button class="drawer-btn" id="drawerArchiveBtn" title="Archive email">📦 Archive</button>
+                <button class="drawer-btn btn-danger-subtle" id="drawerTrashBtn" title="Trash email">🗑️ Trash</button>
+            </div>
+            <button class="btn-close" id="btnCloseDrawer">&times;</button>
+        </div>
+
+        <div class="drawer-content" id="drawerContent">
+            <div class="drawer-loading">
+                <div class="spinner"></div>
+                <p>Loading email content...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- TOAST NOTIFICATIONS                            -->
+    <!-- ============================================== -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

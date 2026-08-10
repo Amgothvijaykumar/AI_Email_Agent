@@ -19,6 +19,7 @@ A production-style AI Gmail agent that understands natural language and controls
 | **Inbox overview** | `Give me an inbox overview` |
 | **Categorize** | `Categorize my emails` |
 | **Summarize** | `Summarize my job emails` |
+| **Web UI Dashboard** | Interactive Web UI at `http://127.0.0.1:8000` |
 
 ---
 
@@ -106,7 +107,20 @@ python email_indexer.py
 
 This fetches your 50 most recent inbox emails and embeds them using Gemini `text-embedding-004` (768-dim). Only new emails are embedded on subsequent runs.
 
-### 5. Run the agent
+### 5. Run the Web UI Dashboard (Recommended)
+
+```bash
+python web_server.py
+```
+Open your browser at **`http://127.0.0.1:8000`**.
+
+Features available in the Web UI:
+- 💬 **AI Agent Chat & Tool Tracing**: Real-time tool execution logs with arguments and in-chat safety confirmation cards.
+- 📥 **Smart Inbox & Reader Drawer**: Filter unread, starred, today's emails, and view complete email content with quick actions.
+- 🏷️ **Gemini Categorizer & Bulk Cleaner**: Group today's emails (Jobs, Finance, Promotions, Social, etc.) and bulk trash unwanted newsletters.
+- 🔍 **Semantic Vector Search Studio**: Concept-based search with cosine similarity match percentage meters.
+
+### 6. Run via CLI (Optional)
 
 ```bash
 python gmail_agent.py
