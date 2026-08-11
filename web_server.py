@@ -699,10 +699,20 @@ async def confirm_delete_action(req: DeleteConfirmRequest):
 # Entry Point
 # ============================================================
 
+def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
+    import socket
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('127.0.0.1', port)) != 0:
+                return port
+    return start_port
+
 if __name__ == "__main__":
     import uvicorn
+    port = find_available_port(8000)
     print("\n" + "=" * 60)
     print("  🚀 Starting AI Gmail Agent Web Server")
-    print("  🌐 UI Dashboard: http://127.0.0.1:8000")
+    print(f"  🌐 UI Dashboard: http://127.0.0.1:{port}")
     print("=" * 60 + "\n")
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+
