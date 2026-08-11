@@ -182,6 +182,7 @@ AIGmailAgent/
 ├── email_ai.py               # Single email analysis helper
 ├── ai_email_agent.py         # Batch email analysis script
 │
+├── requirements.txt          # Python dependencies
 ├── .env.example              # Template for API keys
 ├── .gitignore                # Protects credentials, tokens, .env, index
 └── README.md                 # Project documentation
