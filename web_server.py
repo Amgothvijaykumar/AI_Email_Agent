@@ -1,43 +1,15 @@
-"""
-web_server.py
-=============
-FastAPI backend server for the AI Gmail Agent Web UI.
-
-Provides REST and execution endpoints for:
-- Agent chat with step-by-step tool invocation tracking
-- In-chat human-in-the-loop delete confirmation
-- Inbox listing, filtering, and real-time email reader drawer
-- Email actions (star, unstar, mark read, mark unread, archive, trash)
-- Gemini email categorization and bulk cleaning
-- Semantic vector search with match percentage scores
-- Incremental vector re-indexing
-
-Usage:
-    source avkve/bin/activate
-    python web_server.py
-    # or: uvicorn web_server:app --host 127.0.0.1 --port 8000 --reload
-"""
-
 import os
 import json
 import uuid
-import threading
+import socket
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-
-from langchain_core.messages import (
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-    AIMessage,
-)
-
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from gmail_service import create_gmail_service
 from gemini_client import invoke_with_fallback, extract_text, LLM_MODELS, EMBEDDING_MODEL
 from gmail_tools import (
@@ -62,15 +34,9 @@ load_dotenv()
 
 app = FastAPI(title="AI Gmail Agent API", version="1.0.0")
 
-# Mount static folder
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-# ============================================================
-# Models & In-Memory Sessions
-# ============================================================
 
 TOOLS = [
     search_gmail,
@@ -87,32 +53,14 @@ TOOLS = [
 ]
 TOOL_MAP = {tool.name: tool for tool in TOOLS}
 
-SYSTEM_PROMPT = """
-You are a smart, efficient AI Gmail assistant with access to Gmail tools.
+SYSTEM_PROMPT = """You are an AI Gmail assistant.
+- Use search_gmail for standard filters (senders, dates, read status, subjects).
+- Use search_emails_semantically for topic or conceptual searches.
+- Always retrieve the real Message ID before taking actions.
+- Confirm completed actions cleanly with Markdown."""
 
-SEARCH RULES:
-- Use search_gmail for standard queries (senders: from:xxx, unread: is:unread, dates, subject keywords).
-- Use search_emails_semantically ONLY for concept/topic-based searches (e.g. "internships in machine learning", "hackathons").
-- Make ONE clean search query first.
-
-MODIFICATION & ACTIONS:
-- To read, mark, star, archive, or delete an email, you MUST use search_gmail first to get the real hex Message ID.
-- NEVER invent or make up a Message ID.
-- When asked to delete an email, call delete_email(message_id=<exact_id>). The system will safely ask the user for confirmation.
-
-ANSWER STYLE:
-- Format your answers cleanly with Markdown (bullet points, bold text, clear headings).
-- Show sender, subject, and date for email listings.
-- Confirm actions clearly once executed.
-"""
-
-# Active chat sessions: session_id -> list of LangChain messages
 chat_sessions: Dict[str, List[Any]] = {}
-
-# Pending delete confirmations: confirmation_id -> metadata
 pending_confirmations: Dict[str, Dict[str, Any]] = {}
-
-# Reindex task status
 reindex_status = {
     "is_running": False,
     "last_run": None,
@@ -120,34 +68,42 @@ reindex_status = {
     "message": "Ready"
 }
 
+CATEGORIES = ["Jobs", "Finance", "Promotions", "Social", "Security", "Personal", "Important", "Other"]
+CATEGORY_META = {
+    "Jobs": {"icon": "💼", "color": "#38bdf8", "desc": "Job offers, applications, recruiter emails"},
+    "Finance": {"icon": "💰", "color": "#4ade80", "desc": "Banking, statements, crypto, market digests"},
+    "Promotions": {"icon": "🛍️", "color": "#f472b6", "desc": "Deals, discounts, shopping newsletters"},
+    "Social": {"icon": "👥", "color": "#a78bfa", "desc": "LinkedIn, Pinterest, community notifications"},
+    "Security": {"icon": "🔒", "color": "#fb923c", "desc": "Password resets, 2FA, account alerts"},
+    "Personal": {"icon": "💌", "color": "#f87171", "desc": "Direct human correspondence"},
+    "Important": {"icon": "⭐", "color": "#fbbf24", "desc": "Urgent deadlines, high-priority notices"},
+    "Other": {"icon": "📧", "color": "#94a3b8", "desc": "General updates and newsletters"},
+}
 
-# ============================================================
-# Pydantic Schemas
-# ============================================================
 
 class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
 
+
 class DeleteConfirmRequest(BaseModel):
     session_id: str
     confirmation_id: str
-    action: str  # "confirm" or "cancel"
+    action: str
+
 
 class EmailActionRequest(BaseModel):
-    action: str  # "mark_read", "mark_unread", "star", "unstar", "archive", "trash"
+    action: str
+
 
 class BulkTrashRequest(BaseModel):
     message_ids: List[str]
+
 
 class SemanticSearchRequest(BaseModel):
     query: str
     top_k: int = 5
 
-
-# ============================================================
-# Helper Functions
-# ============================================================
 
 def _is_valid_message_id(message_id: str) -> bool:
     if not message_id or " " in message_id.strip():
@@ -172,33 +128,26 @@ def _get_index_stats() -> dict:
     return {"total": 0, "model": "Not indexed", "dimensions": 0}
 
 
-# ============================================================
-# API Routes
-# ============================================================
-
 @app.get("/")
 async def root():
     index_file = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file)
-    return {"status": "AI Gmail Agent API is running. UI assets loading."}
+    return {"status": "AI Gmail Agent API is running."}
 
 
 @app.get("/api/status")
 async def get_status():
-    """Returns account status, unread count, active models, and index stats."""
+    """Return account info, unread counter, active model names, and index stats."""
     try:
         service = create_gmail_service()
         profile = service.users().getProfile(userId="me").execute()
         email_address = profile.get("emailAddress", "Connected")
 
-        # Unread estimate
         unread_res = service.users().messages().list(
             userId="me", labelIds=["INBOX", "UNREAD"], maxResults=1
         ).execute()
         unread_count = unread_res.get("resultSizeEstimate", 0)
-
-        index_stats = _get_index_stats()
 
         return {
             "status": "connected",
@@ -207,7 +156,7 @@ async def get_status():
             "llm_model": LLM_MODELS[0],
             "fallback_models": LLM_MODELS,
             "embedding_model": EMBEDDING_MODEL,
-            "index_stats": index_stats,
+            "index_stats": _get_index_stats(),
             "timestamp": datetime.now().isoformat(),
         }
     except Exception as e:
@@ -220,28 +169,20 @@ async def get_status():
 
 
 @app.get("/api/emails")
-async def list_emails(
-    q: str = "label:INBOX",
-    max_results: int = 20,
-    page_token: Optional[str] = None
-):
-    """Fetch emails using standard Gmail search query."""
+async def list_emails(q: str = "label:INBOX", max_results: int = 20, page_token: Optional[str] = None):
+    """Retrieve filtered email list."""
     try:
         service = create_gmail_service()
-        req = service.users().messages().list(
+        res = service.users().messages().list(
             userId="me",
             q=q,
             maxResults=min(max_results, 50),
             pageToken=page_token
-        )
-        res = req.execute()
+        ).execute()
+
         messages_meta = res.get("messages", [])
         next_page = res.get("nextPageToken")
-
-        emails = []
-        for m in messages_meta:
-            detail = get_email_details(service, m["id"])
-            emails.append(detail)
+        emails = [get_email_details(service, m["id"]) for m in messages_meta]
 
         return {
             "emails": emails,
@@ -250,12 +191,12 @@ async def list_emails(
             "query": q
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/email/{message_id}")
 async def get_email(message_id: str):
-    """Fetch full email content by ID."""
+    """Retrieve full email content and metadata."""
     try:
         service = create_gmail_service()
         detail = get_email_details(service, message_id)
@@ -270,57 +211,39 @@ async def get_email(message_id: str):
 
 @app.post("/api/email/{message_id}/action")
 async def email_action(message_id: str, req: EmailActionRequest):
-    """Execute a single email action (mark read, star, archive, trash, etc.)."""
+    """Execute single email mutation (star, unread, archive, trash)."""
     service = create_gmail_service()
     action = req.action.lower()
 
     try:
         if action == "mark_read":
-            service.users().messages().modify(
-                userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}
-            ).execute()
-            return {"status": "ok", "message": f"Email marked as read"}
-
+            service.users().messages().modify(userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}).execute()
+            return {"status": "ok", "message": "Email marked as read"}
         elif action == "mark_unread":
-            service.users().messages().modify(
-                userId="me", id=message_id, body={"addLabelIds": ["UNREAD"]}
-            ).execute()
-            return {"status": "ok", "message": f"Email marked as unread"}
-
+            service.users().messages().modify(userId="me", id=message_id, body={"addLabelIds": ["UNREAD"]}).execute()
+            return {"status": "ok", "message": "Email marked as unread"}
         elif action == "star":
-            service.users().messages().modify(
-                userId="me", id=message_id, body={"addLabelIds": ["STARRED"]}
-            ).execute()
-            return {"status": "ok", "message": f"Email starred"}
-
+            service.users().messages().modify(userId="me", id=message_id, body={"addLabelIds": ["STARRED"]}).execute()
+            return {"status": "ok", "message": "Email starred"}
         elif action == "unstar":
-            service.users().messages().modify(
-                userId="me", id=message_id, body={"removeLabelIds": ["STARRED"]}
-            ).execute()
-            return {"status": "ok", "message": f"Star removed"}
-
+            service.users().messages().modify(userId="me", id=message_id, body={"removeLabelIds": ["STARRED"]}).execute()
+            return {"status": "ok", "message": "Star removed"}
         elif action == "archive":
-            service.users().messages().modify(
-                userId="me", id=message_id, body={"removeLabelIds": ["INBOX"]}
-            ).execute()
-            return {"status": "ok", "message": f"Email archived"}
-
+            service.users().messages().modify(userId="me", id=message_id, body={"removeLabelIds": ["INBOX"]}).execute()
+            return {"status": "ok", "message": "Email archived"}
         elif action == "trash":
-            result = execute_delete_email(service, message_id)
-            return {"status": "ok", "message": result}
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
-
+            res = execute_delete_email(service, message_id)
+            return {"status": "ok", "message": res}
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/bulk_trash")
 async def bulk_trash(req: BulkTrashRequest):
-    """Move multiple message IDs to Trash safely."""
+    """Move list of email IDs to Trash."""
     if not req.message_ids:
-        return {"status": "ok", "deleted_count": 0, "messages": []}
+        return {"status": "ok", "deleted_count": 0, "deleted_ids": []}
 
     service = create_gmail_service()
     deleted = []
@@ -342,68 +265,38 @@ async def bulk_trash(req: BulkTrashRequest):
     }
 
 
-# ============================================================
-# Gemini Categorizer Route
-# ============================================================
-
-CATEGORIES = ["Jobs", "Finance", "Promotions", "Social", "Security", "Personal", "Important", "Other"]
-CATEGORY_META = {
-    "Jobs": {"icon": "💼", "color": "#38bdf8", "desc": "Job offers, applications, recruiter emails"},
-    "Finance": {"icon": "💰", "color": "#4ade80", "desc": "Banking, statements, crypto, market digests"},
-    "Promotions": {"icon": "🛍️", "color": "#f472b6", "desc": "Deals, discounts, shopping newsletters"},
-    "Social": {"icon": "👥", "color": "#a78bfa", "desc": "LinkedIn, Pinterest, community notifications"},
-    "Security": {"icon": "🔒", "color": "#fb923c", "desc": "Password resets, 2FA, account alerts"},
-    "Personal": {"icon": "💌", "color": "#f87171", "desc": "Direct 1-on-1 human correspondence"},
-    "Important": {"icon": "⭐", "color": "#fbbf24", "desc": "Urgent deadlines, high-priority notices"},
-    "Other": {"icon": "📧", "color": "#94a3b8", "desc": "General updates and newsletters"},
-}
-
 @app.get("/api/categorize")
 async def categorize_todays_emails(days: int = 1, max_results: int = 25):
-    """Fetch emails received today (since local midnight) and categorize them with Gemini."""
+    """Group today's emails into categories using Gemini."""
     service = create_gmail_service()
-    from datetime import datetime
     today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    midnight_ts = int(today_midnight.timestamp())
-    query = f"after:{midnight_ts}"
-    
+    query = f"after:{int(today_midnight.timestamp())}"
+
     try:
         _, messages = search_emails(query, max_results=max_results)
         if not messages:
-            # Fallback to general latest if no emails yet today
             _, messages = search_emails("label:INBOX", max_results=15)
 
-        emails = []
-        for m in messages:
-            emails.append(get_email_details(service, m["id"]))
-
-        # Structure container
+        emails = [get_email_details(service, m["id"]) for m in messages]
         categorized: Dict[str, List[dict]] = {cat: [] for cat in CATEGORIES}
 
-        # Prompt Gemini in batches or single multi-prompt to optimize latency
-        batch_prompt = "Categorize each of these emails into EXACTLY ONE of: Jobs, Finance, Promotions, Social, Security, Personal, Important, Other.\n\n"
+        batch_prompt = "Categorize each email into ONE of: Jobs, Finance, Promotions, Social, Security, Personal, Important, Other.\n\n"
         for idx, em in enumerate(emails, 1):
-            batch_prompt += f"[{idx}] ID: {em['id']}\nFrom: {em['sender']}\nSubject: {em['subject']}\nSnippet: {em.get('body', '')[:150].replace(chr(10), ' ')}\n\n"
-        
-        batch_prompt += "\nOutput EXACTLY in this format for each number:\n[1] Category: <Category> | Reason: <One short sentence>\n[2] Category: <Category> | Reason: <One short sentence>"
+            batch_prompt += f"[{idx}] ID: {em['id']}\nFrom: {em['sender']}\nSubject: {em['subject']}\nSnippet: {em.get('body', '')[:140]}\n\n"
+        batch_prompt += "\nOutput format:\n[1] Category: <Category> | Reason: <One sentence>"
 
         response = invoke_with_fallback([
-            SystemMessage(content="You are a precise email categorizer. Output only the requested numbered format."),
+            SystemMessage(content="You are an email categorizer. Output only the requested numbered format."),
             HumanMessage(content=batch_prompt)
         ])
-        
-        resp_text = extract_text(response)
-        
-        # Parse lines
+
         cat_map = {}
-        for line in resp_text.splitlines():
+        for line in extract_text(response).splitlines():
             line = line.strip()
             if line.startswith("[") and "]" in line:
                 try:
-                    num_part = line.split("]")[0].replace("[", "").strip()
-                    idx = int(num_part) - 1
+                    num = int(line.split("]")[0].replace("[", "").strip()) - 1
                     rest = line.split("]")[1].strip()
-                    
                     cat = "Other"
                     reason = ""
                     if "Category:" in rest:
@@ -414,8 +307,7 @@ async def categorize_todays_emails(days: int = 1, max_results: int = 25):
                                 break
                     if "Reason:" in rest:
                         reason = rest.split("Reason:")[1].strip()
-                    
-                    cat_map[idx] = (cat, reason)
+                    cat_map[num] = (cat, reason)
                 except Exception:
                     continue
 
@@ -431,25 +323,20 @@ async def categorize_todays_emails(days: int = 1, max_results: int = 25):
             "category_meta": CATEGORY_META,
             "query": query
         }
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Categorization failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-# ============================================================
-# Semantic Vector Search Route
-# ============================================================
 
 @app.post("/api/semantic_search")
 async def semantic_search_api(req: SemanticSearchRequest):
-    """Run vector search with cosine similarity against indexed emails."""
+    """Execute vector search with cosine similarity."""
     try:
         from gemini_client import embed_text
         import numpy as np
 
         storage_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "email_embeddings.json")
         if not os.path.exists(storage_path):
-            raise HTTPException(status_code=404, detail="Email vector index not found. Please run indexing first.")
+            raise HTTPException(status_code=404, detail="Email vector index not found. Run indexing first.")
 
         with open(storage_path, "r") as f:
             data = json.load(f)
@@ -468,7 +355,7 @@ async def semantic_search_api(req: SemanticSearchRequest):
                 continue
             denom = query_norm * np.linalg.norm(emb)
             score = float(np.dot(query_vec, emb) / denom) if denom > 0 else 0.0
-            
+
             scored.append({
                 "id": r.get("id"),
                 "subject": r.get("subject", "(No subject)"),
@@ -480,43 +367,40 @@ async def semantic_search_api(req: SemanticSearchRequest):
             })
 
         scored.sort(key=lambda x: x["similarity_score"], reverse=True)
-        top_results = scored[:req.top_k]
-
         return {
             "query": req.query,
             "total_indexed": len(records),
-            "results": top_results,
+            "results": scored[:req.top_k],
             "embedding_model": data.get("embedding_model", EMBEDDING_MODEL)
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/reindex")
 async def trigger_reindex(background_tasks: BackgroundTasks):
-    """Trigger background incremental vector index update."""
+    """Trigger background incremental vector index generation."""
     global reindex_status
     if reindex_status["is_running"]:
-        return {"status": "in_progress", "message": "Index update is already running."}
+        return {"status": "in_progress", "message": "Indexing is already running."}
 
-    def _run_indexer():
+    def _run():
         global reindex_status
         reindex_status["is_running"] = True
-        reindex_status["message"] = "Fetching new emails and generating Gemini embeddings..."
+        reindex_status["message"] = "Indexing emails..."
         try:
             service = create_gmail_service()
             records = update_index(service, max_results=50)
             reindex_status["total_indexed"] = len(records)
             reindex_status["last_run"] = datetime.now().isoformat()
-            reindex_status["message"] = f"Successfully indexed {len(records)} emails."
+            reindex_status["message"] = f"Indexed {len(records)} emails."
         except Exception as e:
-            reindex_status["message"] = f"Indexing error: {str(e)}"
+            reindex_status["message"] = f"Indexing error: {e}"
         finally:
             reindex_status["is_running"] = False
 
-    background_tasks.add_task(_run_indexer)
-    return {"status": "started", "message": "Indexing started in the background."}
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Indexing started in background."}
 
 
 @app.get("/api/reindex/status")
@@ -527,21 +411,10 @@ async def get_reindex_status():
     return reindex_status
 
 
-# ============================================================
-# Interactive Agent Chat Loop with Step Tracing & Delete Confirmation
-# ============================================================
-
 @app.post("/api/chat")
 async def chat_with_agent(req: ChatRequest):
-    """
-    Runs the agent loop with real-time tool execution tracking.
-    Returns:
-    - steps: list of tool calls made, args, results
-    - response: final AI assistant text
-    - pending_confirmation: present if a destructive delete is requested
-    """
+    """Execute interactive chat turn with tool tracing and safety confirmation."""
     session_id = req.session_id or str(uuid.uuid4())
-    
     if session_id not in chat_sessions:
         chat_sessions[session_id] = [SystemMessage(content=SYSTEM_PROMPT)]
 
@@ -553,22 +426,18 @@ async def chat_with_agent(req: ChatRequest):
     pending_confirmation = None
     final_text = ""
 
-    MAX_TOOL_ITERATIONS = 5
-
-    for iteration in range(MAX_TOOL_ITERATIONS):
+    for iteration in range(5):
         try:
             ai_resp = invoke_with_fallback(history, tools=TOOLS)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gemini LLM error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Gemini error: {e}")
 
         history.append(ai_resp)
 
-        # If no tool calls, we have our final text answer
         if not ai_resp.tool_calls:
             final_text = extract_text(ai_resp)
             break
 
-        # Process tool calls
         for tool_call in ai_resp.tool_calls:
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
@@ -582,43 +451,32 @@ async def chat_with_agent(req: ChatRequest):
                 "result": None,
             }
 
-            # Duplicate call check
-            signature = f"{tool_name}::{json.dumps(tool_args, sort_keys=True)}"
-            if signature in executed_calls:
+            sig = f"{tool_name}::{json.dumps(tool_args, sort_keys=True)}"
+            if sig in executed_calls:
                 step_entry["status"] = "duplicate_stopped"
-                step_entry["result"] = "Duplicate call stopped to prevent loops."
+                step_entry["result"] = "Duplicate tool call stopped."
                 steps_log.append(step_entry)
                 history.append(ToolMessage(
-                    content="ERROR: Duplicate tool call. Provide final answer with existing knowledge.",
+                    content="ERROR: Duplicate call stopped. Provide final response.",
                     tool_call_id=tool_id
                 ))
                 continue
+            executed_calls.add(sig)
 
-            executed_calls.add(signature)
-
-            # Validate Message ID for action tools
             id_tools = {"read_gmail_email", "mark_email_as_read", "mark_email_as_unread", "star_email", "unstar_email", "archive_email", "delete_email"}
             if tool_name in id_tools:
                 msg_id = str(tool_args.get("message_id", "")).strip()
                 if not _is_valid_message_id(msg_id):
-                    err_msg = f"ERROR: '{msg_id}' is not a valid 16-hex Gmail Message ID. Search with search_gmail first."
+                    err = f"ERROR: '{msg_id}' is not a valid hex Message ID. Search first."
                     step_entry["status"] = "invalid_id"
-                    step_entry["result"] = err_msg
+                    step_entry["result"] = err
                     steps_log.append(step_entry)
-                    history.append(ToolMessage(content=err_msg, tool_call_id=tool_id))
+                    history.append(ToolMessage(content=err, tool_call_id=tool_id))
                     continue
 
-            # Execute tool
             tool_fn = TOOL_MAP.get(tool_name)
-            if not tool_fn:
-                tool_res = f"Unknown tool: {tool_name}"
-            else:
-                try:
-                    tool_res = tool_fn.invoke(tool_args)
-                except Exception as e:
-                    tool_res = f"Tool execution failed: {str(e)}"
+            tool_res = tool_fn.invoke(tool_args) if tool_fn else f"Unknown tool: {tool_name}"
 
-            # Handle Delete Confirmation Intercept (single or batch)
             if (
                 (tool_name == "delete_email" or tool_name == "batch_delete_emails")
                 and isinstance(tool_res, str)
@@ -647,31 +505,29 @@ async def chat_with_agent(req: ChatRequest):
                         "message_ids": mids,
                         "count": len(mids),
                         "items": email_items,
-                        "prompt": f"Are you sure you want to move all {len(mids)} selected emails to Gmail Trash?"
+                        "prompt": f"Confirm moving all {len(mids)} email(s) to Gmail Trash?"
                     }
                 else:
                     mid = tool_args.get("message_id")
-                    email_meta = get_email_details(service, mid)
+                    em = get_email_details(service, mid)
                     pending_confirmation = {
                         "confirmation_id": confirm_id,
                         "session_id": session_id,
                         "tool_call_id": tool_id,
                         "is_batch": False,
                         "message_id": mid,
-                        "subject": email_meta.get("subject", "No subject"),
-                        "sender": email_meta.get("sender", "Unknown"),
-                        "date": email_meta.get("date", ""),
-                        "snippet": email_meta.get("body", "")[:200].strip(),
-                        "prompt": "Are you sure you want to move this email to Gmail Trash?"
+                        "subject": em.get("subject", "No subject"),
+                        "sender": em.get("sender", "Unknown"),
+                        "date": em.get("date", ""),
+                        "snippet": em.get("body", "")[:200].strip(),
+                        "prompt": "Confirm moving this email to Gmail Trash?"
                     }
 
                 pending_confirmations[confirm_id] = pending_confirmation
-
                 step_entry["status"] = "awaiting_confirmation"
-                step_entry["result"] = f"Safety check: Awaiting user confirmation to move email(s) to Trash."
+                step_entry["result"] = "Awaiting user confirmation to move email(s) to Trash."
                 steps_log.append(step_entry)
 
-                # Return early with confirmation state
                 return {
                     "session_id": session_id,
                     "steps": steps_log,
@@ -682,7 +538,6 @@ async def chat_with_agent(req: ChatRequest):
             step_entry["status"] = "completed"
             step_entry["result"] = str(tool_res)
             steps_log.append(step_entry)
-
             history.append(ToolMessage(content=str(tool_res), tool_call_id=tool_id))
 
     if not final_text and not pending_confirmation:
@@ -698,36 +553,31 @@ async def chat_with_agent(req: ChatRequest):
 
 @app.post("/api/chat/confirm_delete")
 async def confirm_delete_action(req: DeleteConfirmRequest):
-    """Handles the user's confirmation response for a pending single or batch deletion."""
+    """Execute confirmed single or batch deletion."""
     confirm_data = pending_confirmations.get(req.confirmation_id)
     if not confirm_data:
-        raise HTTPException(status_code=404, detail="Pending confirmation expired or not found")
+        raise HTTPException(status_code=404, detail="Confirmation request expired")
 
     session_id = req.session_id
     history = chat_sessions.get(session_id, [])
     tool_call_id = confirm_data["tool_call_id"]
-
     del pending_confirmations[req.confirmation_id]
 
     if req.action == "confirm":
         service = create_gmail_service()
         if confirm_data.get("is_batch"):
             mids = confirm_data.get("message_ids", [])
-            delete_result = execute_batch_delete_emails(service, mids)
-            tool_response = delete_result
-            final_text = f"✅ **Batch Deletion Complete**: {delete_result}"
+            tool_response = execute_batch_delete_emails(service, mids)
+            final_text = f"✅ **Batch Deletion Complete**: {tool_response}"
         else:
             mid = confirm_data.get("message_id")
-            delete_result = execute_delete_email(service, mid)
-            tool_response = delete_result
+            tool_response = execute_delete_email(service, mid)
             final_text = f"✅ **Email Deleted**: The email `{confirm_data.get('subject', mid)}` has been moved to Gmail Trash."
     else:
         tool_response = "Deletion was cancelled by the user."
         final_text = "❌ **Cancelled**: Deletion was cancelled. No emails were modified."
 
-    # Feed result back into history as ToolMessage
     history.append(ToolMessage(content=tool_response, tool_call_id=tool_call_id))
-
     return {
         "session_id": session_id,
         "status": "success",
@@ -736,24 +586,17 @@ async def confirm_delete_action(req: DeleteConfirmRequest):
     }
 
 
-# ============================================================
-# Entry Point
-# ============================================================
-
 def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
-    import socket
-    for port in range(start_port, start_port + max_attempts):
+    """Find an available port starting from start_port."""
+    for p in range(start_port, start_port + max_attempts):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('127.0.0.1', port)) != 0:
-                return port
+            if s.connect_ex(('127.0.0.1', p)) != 0:
+                return p
     return start_port
+
 
 if __name__ == "__main__":
     import uvicorn
     port = find_available_port(8000)
-    print("\n" + "=" * 60)
-    print("  🚀 Starting AI Gmail Agent Web Server")
-    print(f"  🌐 UI Dashboard: http://127.0.0.1:{port}")
-    print("=" * 60 + "\n")
+    print(f"Starting server on http://127.0.0.1:{port}")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
-
