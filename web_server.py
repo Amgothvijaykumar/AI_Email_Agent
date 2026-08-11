@@ -49,8 +49,10 @@ from gmail_tools import (
     unstar_email,
     archive_email,
     delete_email,
+    batch_delete_emails,
     get_inbox_overview,
     execute_delete_email,
+    execute_batch_delete_emails,
 )
 from semantic_search_tool import search_emails_semantically
 from read_emails import get_email_details, search_emails
@@ -79,6 +81,7 @@ TOOLS = [
     unstar_email,
     archive_email,
     delete_email,
+    batch_delete_emails,
     get_inbox_overview,
     search_emails_semantically,
 ]
@@ -615,34 +618,64 @@ async def chat_with_agent(req: ChatRequest):
                 except Exception as e:
                     tool_res = f"Tool execution failed: {str(e)}"
 
-            # Handle Delete Confirmation Intercept
-            if tool_name == "delete_email" and isinstance(tool_res, str) and "DELETE_CONFIRMATION_REQUIRED" in tool_res:
+            # Handle Delete Confirmation Intercept (single or batch)
+            if (
+                (tool_name == "delete_email" or tool_name == "batch_delete_emails")
+                and isinstance(tool_res, str)
+                and ("DELETE_CONFIRMATION_REQUIRED" in tool_res or "BATCH_DELETE_CONFIRMATION_REQUIRED" in tool_res)
+            ):
                 confirm_id = str(uuid.uuid4())
                 service = create_gmail_service()
-                email_meta = get_email_details(service, tool_args.get("message_id"))
 
-                pending_confirmation = {
-                    "confirmation_id": confirm_id,
-                    "session_id": session_id,
-                    "tool_call_id": tool_id,
-                    "message_id": tool_args.get("message_id"),
-                    "subject": email_meta.get("subject", "No subject"),
-                    "sender": email_meta.get("sender", "Unknown"),
-                    "date": email_meta.get("date", ""),
-                    "snippet": email_meta.get("body", "")[:200].strip(),
-                    "prompt": "Are you sure you want to move this email to Gmail Trash?"
-                }
+                if tool_name == "batch_delete_emails":
+                    mids = tool_args.get("message_ids", [])
+                    email_items = []
+                    for mid in mids:
+                        em = get_email_details(service, mid)
+                        email_items.append({
+                            "id": mid,
+                            "subject": em.get("subject", "No subject"),
+                            "sender": em.get("sender", "Unknown"),
+                            "date": em.get("date", ""),
+                        })
+
+                    pending_confirmation = {
+                        "confirmation_id": confirm_id,
+                        "session_id": session_id,
+                        "tool_call_id": tool_id,
+                        "is_batch": True,
+                        "message_ids": mids,
+                        "count": len(mids),
+                        "items": email_items,
+                        "prompt": f"Are you sure you want to move all {len(mids)} selected emails to Gmail Trash?"
+                    }
+                else:
+                    mid = tool_args.get("message_id")
+                    email_meta = get_email_details(service, mid)
+                    pending_confirmation = {
+                        "confirmation_id": confirm_id,
+                        "session_id": session_id,
+                        "tool_call_id": tool_id,
+                        "is_batch": False,
+                        "message_id": mid,
+                        "subject": email_meta.get("subject", "No subject"),
+                        "sender": email_meta.get("sender", "Unknown"),
+                        "date": email_meta.get("date", ""),
+                        "snippet": email_meta.get("body", "")[:200].strip(),
+                        "prompt": "Are you sure you want to move this email to Gmail Trash?"
+                    }
+
                 pending_confirmations[confirm_id] = pending_confirmation
 
                 step_entry["status"] = "awaiting_confirmation"
-                step_entry["result"] = "Safety check: Awaiting user confirmation to move email to Trash."
+                step_entry["result"] = f"Safety check: Awaiting user confirmation to move email(s) to Trash."
                 steps_log.append(step_entry)
 
                 # Return early with confirmation state
                 return {
                     "session_id": session_id,
                     "steps": steps_log,
-                    "response": "⚠️ **Confirmation Needed**: This action will move the following email to Gmail Trash (recoverable within 30 days). Please confirm below.",
+                    "response": "⚠️ **Confirmation Needed**: Please review and confirm the email(s) to be moved to Gmail Trash (recoverable within 30 days).",
                     "pending_confirmation": pending_confirmation
                 }
 
@@ -665,7 +698,7 @@ async def chat_with_agent(req: ChatRequest):
 
 @app.post("/api/chat/confirm_delete")
 async def confirm_delete_action(req: DeleteConfirmRequest):
-    """Handles the user's confirmation response for a pending deletion."""
+    """Handles the user's confirmation response for a pending single or batch deletion."""
     confirm_data = pending_confirmations.get(req.confirmation_id)
     if not confirm_data:
         raise HTTPException(status_code=404, detail="Pending confirmation expired or not found")
@@ -673,18 +706,24 @@ async def confirm_delete_action(req: DeleteConfirmRequest):
     session_id = req.session_id
     history = chat_sessions.get(session_id, [])
     tool_call_id = confirm_data["tool_call_id"]
-    message_id = confirm_data["message_id"]
 
     del pending_confirmations[req.confirmation_id]
 
     if req.action == "confirm":
         service = create_gmail_service()
-        delete_result = execute_delete_email(service, message_id)
-        tool_response = delete_result
-        final_text = f"✅ **Email Deleted**: The email `{confirm_data['subject']}` has been moved to Gmail Trash."
+        if confirm_data.get("is_batch"):
+            mids = confirm_data.get("message_ids", [])
+            delete_result = execute_batch_delete_emails(service, mids)
+            tool_response = delete_result
+            final_text = f"✅ **Batch Deletion Complete**: {delete_result}"
+        else:
+            mid = confirm_data.get("message_id")
+            delete_result = execute_delete_email(service, mid)
+            tool_response = delete_result
+            final_text = f"✅ **Email Deleted**: The email `{confirm_data.get('subject', mid)}` has been moved to Gmail Trash."
     else:
         tool_response = "Deletion was cancelled by the user."
-        final_text = f"❌ **Cancelled**: Deletion was cancelled. The email was not modified."
+        final_text = "❌ **Cancelled**: Deletion was cancelled. No emails were modified."
 
     # Feed result back into history as ToolMessage
     history.append(ToolMessage(content=tool_response, tool_call_id=tool_call_id))
@@ -694,7 +733,6 @@ async def confirm_delete_action(req: DeleteConfirmRequest):
         "status": "success",
         "action": req.action,
         "response": final_text,
-        "message_id": message_id
     }
 
 

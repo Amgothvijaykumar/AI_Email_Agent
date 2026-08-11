@@ -313,7 +313,51 @@ def delete_email(message_id: str) -> str:
         f"Subject: {email['subject']}\n"
         f"Sender: {email['sender']}\n"
         f"Date: {email['date']}\n"
-        f"\n⚠️  This action is PERMANENT and IRREVERSIBLE.\n"
+        f"\n⚠️  This will move the email to Gmail Trash (recoverable for 30 days).\n"
+        f"Reply 'yes' to confirm deletion or 'no' to cancel."
+    )
+
+
+# ============================================================
+# Tool 8b: Batch delete emails (safe — confirmation required)
+# ============================================================
+
+@tool
+def batch_delete_emails(message_ids: list[str]) -> str:
+    """
+    Request deletion of multiple emails at once (e.g. all promotional emails,
+    all newsletters, all emails from a specific sender).
+
+    IMPORTANT: This tool does NOT immediately delete the emails.
+    It gathers their details and returns a confirmation request that Python/UI
+    presents to the user before any actual deletion occurs.
+
+    Args:
+        message_ids: List of exact Gmail Message IDs returned by search_gmail
+                     (e.g. ["19fef5058304439a", "19fef2eb4088ef50"])
+    """
+    if not message_ids:
+        return "No message IDs provided to delete."
+
+    service = _get_service()
+    email_summaries = []
+
+    for mid in message_ids:
+        try:
+            email = get_email_details(service, mid)
+            if email and email.get("subject"):
+                email_summaries.append(f"• [{mid}] {email['subject']} (From: {email['sender']})")
+        except Exception:
+            email_summaries.append(f"• [{mid}] (Message details unavailable)")
+
+    summary_text = "\n".join(email_summaries)
+
+    return (
+        f"BATCH_DELETE_CONFIRMATION_REQUIRED\n"
+        f"Count: {len(message_ids)} email(s)\n"
+        f"IDs: {','.join(message_ids)}\n\n"
+        f"Emails to delete:\n{summary_text}\n\n"
+        f"⚠️  This will move all {len(message_ids)} email(s) to Gmail Trash (recoverable for 30 days).\n"
         f"Reply 'yes' to confirm deletion or 'no' to cancel."
     )
 
@@ -325,7 +369,7 @@ def delete_email(message_id: str) -> str:
 
 def execute_delete_email(service, message_id: str) -> str:
     """
-    Actually delete an email. Call this ONLY after explicit
+    Actually delete an email by moving it to Trash. Call this ONLY after explicit
     user confirmation. This is NOT exposed as a Gemini tool.
 
     Args:
@@ -343,6 +387,37 @@ def execute_delete_email(service, message_id: str) -> str:
         return f"✓ Email {message_id} has been moved to Trash."
     except Exception as e:
         return f"Deletion failed: {e}"
+
+
+def execute_batch_delete_emails(service, message_ids: list[str]) -> str:
+    """
+    Move a list/bunch of emails to Trash at once. Call this ONLY after explicit
+    user confirmation.
+
+    Args:
+        service: Gmail API service
+        message_ids: List of Gmail message IDs
+
+    Returns:
+        Summary confirmation string
+    """
+    if not message_ids:
+        return "No emails specified to delete."
+
+    success_count = 0
+    errors = []
+
+    for mid in message_ids:
+        try:
+            service.users().messages().trash(userId="me", id=mid).execute()
+            success_count += 1
+        except Exception as e:
+            errors.append(f"{mid}: {e}")
+
+    result = f"✓ Successfully moved {success_count} email(s) to Gmail Trash."
+    if errors:
+        result += f" ({len(errors)} failed to trash)"
+    return result
 
 
 # ============================================================

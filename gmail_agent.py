@@ -44,8 +44,10 @@ from gmail_tools import (
     unstar_email,
     archive_email,
     delete_email,
+    batch_delete_emails,
     get_inbox_overview,
     execute_delete_email,
+    execute_batch_delete_emails,
 )
 
 from gmail_service import create_gmail_service
@@ -65,7 +67,7 @@ MAX_TOOL_ITERATIONS = 5
 
 # ============================================================
 # Tool registry
-# (delete_email returns a confirmation request, not actual delete)
+# (delete_email & batch_delete_emails return confirmation requests)
 # ============================================================
 
 TOOLS = [
@@ -77,6 +79,7 @@ TOOLS = [
     unstar_email,
     archive_email,
     delete_email,
+    batch_delete_emails,
     get_inbox_overview,
     search_emails_semantically,
 ]
@@ -121,22 +124,27 @@ MODIFICATION RULES
 ============================================================
 
 To mark/star/archive/delete an email:
-1. Use search_gmail to find the email
-2. Use the EXACT Message ID from the results
+1. Use search_gmail to find the email(s)
+2. Use the EXACT Message IDs from the results
 3. Call the modification tool with that ID
 
 NEVER invent a Message ID. Never use subject, sender name,
 or any text as a message_id. Only IDs like "19fe5f834c141592".
 
 ============================================================
-DELETE RULE
+DELETE RULES
 ============================================================
 
-When asked to delete an email:
-1. Search for it with search_gmail
-2. Call delete_email(message_id=<exact_id>)
-3. Python will ask the user for confirmation before deleting
+- For a SINGLE email:
+  1. Search for it with search_gmail
+  2. Call delete_email(message_id=<exact_id>)
 
+- For MULTIPLE / BATCH emails (e.g. promotional emails, newsletters, all emails from a sender):
+  1. Search for the matching emails with search_gmail (e.g. category:promotions, from:newsletter, etc.)
+  2. Collect all matching Message IDs
+  3. Call batch_delete_emails(message_ids=[id1, id2, id3, ...])
+
+Python/UI will always ask the user for confirmation before moving emails to Trash.
 Do NOT attempt to delete without searching first.
 
 ============================================================
@@ -358,36 +366,33 @@ def run_agent():
                     except Exception as e:
                         tool_result = f"Tool error: {e}"
 
-                # ---- Handle delete confirmation ----
+                # ---- Handle delete confirmation (single or batch) ----
                 if (
-                    tool_name == "delete_email"
+                    (tool_name == "delete_email" or tool_name == "batch_delete_emails")
                     and isinstance(tool_result, str)
-                    and "DELETE_CONFIRMATION_REQUIRED" in tool_result
+                    and ("DELETE_CONFIRMATION_REQUIRED" in tool_result or "BATCH_DELETE_CONFIRMATION_REQUIRED" in tool_result)
                 ):
-                    pending_delete = {
-                        "message_id": tool_args.get("message_id"),
-                        "details": tool_result,
-                    }
-
                     print(f"\n⚠️  {tool_result}")
 
                     confirm = input(
-                        "\nType 'yes' to permanently delete, 'no' to cancel: "
+                        "\nType 'yes' to move to Trash, 'no' to cancel: "
                     ).strip().lower()
 
                     if confirm == "yes":
                         service = create_gmail_service()
-                        delete_result = execute_delete_email(
-                            service,
-                            pending_delete["message_id"],
-                        )
+                        if tool_name == "batch_delete_emails":
+                            mids = tool_args.get("message_ids", [])
+                            delete_result = execute_batch_delete_emails(service, mids)
+                        else:
+                            delete_result = execute_delete_email(
+                                service,
+                                tool_args.get("message_id"),
+                            )
                         tool_result = delete_result
                         print(f"   {delete_result}")
                     else:
-                        tool_result = "Deletion cancelled by user."
+                        tool_result = "Deletion was cancelled by the user."
                         print("   Deletion cancelled.")
-
-                    pending_delete = None
 
                 print(f"   ✓ Result: {str(tool_result)[:200]}")
 

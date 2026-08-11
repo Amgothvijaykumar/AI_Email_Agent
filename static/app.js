@@ -332,24 +332,51 @@ function appendAgentMessage(data) {
     textDiv.innerHTML = parseMarkdown(data.response);
     bubble.appendChild(textDiv);
 
-    // 3. Pending Delete Confirmation Card
+    // 3. Pending Delete Confirmation Card (Single or Batch)
     if (data.pending_confirmation) {
         const confirmData = data.pending_confirmation;
         const confirmCard = document.createElement('div');
         confirmCard.className = 'safety-confirm-card';
-        confirmCard.innerHTML = `
-            <div class="safety-header">
-                <span>⚠️ Safety Check: Move to Trash</span>
-            </div>
-            <div class="safety-details">
+
+        let detailsHtml = '';
+        let titleText = '⚠️ Safety Check: Move to Trash';
+        let btnText = '🗑️ Move to Trash';
+
+        if (confirmData.is_batch && confirmData.items) {
+            titleText = `⚠️ Safety Check: Move ${confirmData.count} Emails to Trash`;
+            btnText = `🗑️ Move all ${confirmData.count} to Trash`;
+            
+            let listItems = confirmData.items.map(item => `
+                <div style="margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:4px;">
+                    <div style="font-weight:600; color:#ffffff;">• ${item.subject}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8;">From: ${item.sender.split('<')[0]} • ${item.date}</div>
+                </div>
+            `).join('');
+
+            detailsHtml = `
+                <div style="max-height:180px; overflow-y:auto; padding-right:4px;">
+                    ${listItems}
+                </div>
+            `;
+        } else {
+            detailsHtml = `
                 <div><b>Subject:</b> ${confirmData.subject}</div>
                 <div><b>Sender:</b> ${confirmData.sender}</div>
                 <div><b>Date:</b> ${confirmData.date}</div>
-                <div><b>Preview:</b> <i>${confirmData.snippet}</i></div>
+                <div><b>Preview:</b> <i>${confirmData.snippet || ''}</i></div>
+            `;
+        }
+
+        confirmCard.innerHTML = `
+            <div class="safety-header">
+                <span>${titleText}</span>
+            </div>
+            <div class="safety-details">
+                ${detailsHtml}
             </div>
             <div class="safety-actions">
                 <button class="btn-cancel-trash" id="btnCancel_${confirmData.confirmation_id}">Cancel</button>
-                <button class="btn-confirm-trash" id="btnConfirm_${confirmData.confirmation_id}">🗑️ Move to Trash</button>
+                <button class="btn-confirm-trash" id="btnConfirm_${confirmData.confirmation_id}">${btnText}</button>
             </div>
         `;
 
