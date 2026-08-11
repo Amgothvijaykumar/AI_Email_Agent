@@ -1,254 +1,210 @@
-# AI Gmail Agent — Powered by Gemini
+# AI Gmail Agent & Copilot — Powered by Google Gemini
 
-A production-style AI Gmail agent that understands natural language and controls your Gmail inbox using Google Gemini as the LLM and the Gmail API for all email operations.
-
----
-
-## Features
-
-| Capability | Command Example |
-|------------|-----------------|
-| **Search Gmail** | `Find emails from Indeed` |
-| **Read email** | `Read the Adobe hackathon email` |
-| **Semantic search** | `Find emails related to machine learning` |
-| **Mark as read** | `Mark the testing email as read` |
-| **Mark as unread** | `Mark the Indeed email as unread` |
-| **Star / Unstar** | `Star the Slack email` |
-| **Archive** | `Archive the Groww digest` |
-| **Safe delete** | `Delete the testing email` *(asks for confirmation)* |
-| **Inbox overview** | `Give me an inbox overview` |
-| **Categorize** | `Categorize my emails` |
-| **Summarize** | `Summarize my job emails` |
-| **Web UI Dashboard** | Interactive Web UI at `http://127.0.0.1:8000` |
+A production-ready, intelligent AI Gmail agent and web dashboard that understands natural language to search, categorize, read, star, archive, and safely trash emails using Google Gemini LLMs and official Gmail API.
 
 ---
 
-## Architecture
+## 🌟 Key Features
+
+| Feature | Description | Example Request |
+|---------|-------------|-----------------|
+| 💬 **AI Agent Copilot** | Natural language tool-controlled assistant with step-by-step reasoning | *"Find my unread emails from Indeed"* |
+| 🌐 **Modern Web UI Dashboard** | Interactive glassmorphic single-page dashboard at `http://127.0.0.1:8000` | Open browser for full UI |
+| 🛡️ **Interactive Safety Checks** | In-chat and CLI confirmation cards before trashing single or batch emails | *"Delete the test email"* |
+| 🗑️ **Batch & Bunch Trashing** | Safely bulk delete matching emails (promotions, newsletters, senders) | *"Delete all promotional emails from today"* |
+| 🏷️ **Gemini Email Categorizer** | Groups emails into 8 intent categories (*Jobs, Finance, Promotions, Social, Security, Personal, Important, Other*) | *"Categorize today's emails"* |
+| 🔍 **Semantic Vector Search** | Concept search using 3072-dimensional Gemini embeddings (`models/gemini-embedding-001`) | *"Find emails related to hackathons"* |
+| 📥 **Smart Inbox & Drawer Reader** | Filter unread, starred, today's emails and read full bodies with one-click actions | Instant filter and sliding drawer reader |
+| 🕒 **Local IST Time Normalization** | Converts raw international email timestamps to clean local Indian Standard Time | Automatic timezone formatting |
+| 🔄 **Multi-Key & Model Fallback** | Resilient rotation across Gemini models and multiple API keys on rate limits | Auto-fallback on `429` quota limits |
+| 🔐 **Permanent OAuth Auth** | Google Cloud Production configuration ensuring tokens never expire | One-time OAuth setup |
+
+---
+
+## 🏗️ Architecture
 
 ```
-USER
-  |
-  v
-GEMINI (gemini-flash-latest with tool calling)
-  |
-  | decides which tool to use
-  v
-TOOL CONTROLLER (Python — controlled loop, dedup detection)
-  |
-  +------------------+-------------------+
-  |                  |                   |
-  v                  v                   v
-search_gmail    read_gmail_email    search_emails_semantically
-mark_as_read    mark_as_unread      (Gemini text-embedding-004)
-star/archive    delete (safe)
-get_overview
-  |
-  v
-GMAIL API (OAuth2, gmail.modify scope)
-  |
-  v
-GEMINI (generates final answer)
-  |
-  v
-USER
+                                    +----------------------------------------------------+
+                                    |                User Interfaces                     |
+                                    |  • Modern Web UI Dashboard (FastAPI + SPA)        |
+                                    |  • Interactive CLI Agent (gmail_agent.py)          |
+                                    +----------------------------------------------------+
+                                                             |
+                                                             v
+                                    +----------------------------------------------------+
+                                    |             Gemini LLM Tool Controller             |
+                                    |  (Model fallback chain + multi-key rotation)       |
+                                    +----------------------------------------------------+
+                                                             |
+                                        Decides and executes tools autonomously:
+                                                             |
+                 +-------------------+-----------------------+-----------------------+-------------------+
+                 |                   |                       |                       |                   |
+                 v                   v                       v                       v                   v
+          search_gmail        read_gmail_email        batch_delete_emails      get_inbox_overview  search_emails_semantically
+          mark_email_read     star / unstar           delete_email (single)   (strict midnight)   (Gemini 3072-dim vectors)
+          mark_email_unread   archive_email          (safety confirmation)
+                 |                   |                       |                       |                   |
+                 +-------------------+-----------------------+-----------------------+-------------------+
+                                                             |
+                                                             v
+                                    +----------------------------------------------------+
+                                    |            Official Gmail API (OAuth2)             |
+                                    |         Scope: .../auth/gmail.modify               |
+                                    +----------------------------------------------------+
+                                                             |
+                                                             v
+                                    +----------------------------------------------------+
+                                    |               Gemini Final Response                |
+                                    |   Formatted Markdown + Step Tracing + Action Cards |
+                                    +----------------------------------------------------+
 ```
 
 ---
 
-## Setup
+## 🚀 Getting Started
 
-### 1. Clone and create virtual environment
+### 1. Clone & Setup Virtual Environment
 
 ```bash
-git clone <your-repo>
-cd AIGmailAgent
+git clone https://github.com/Amgothvijaykumar/AI_Email_Agent.git
+cd AI_Email_Agent
 python -m venv avkve
 source avkve/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Set up Gmail OAuth
+### 2. Configure Gemini API Keys
 
-Go to [Google Cloud Console](https://console.cloud.google.com):
-1. Create a project → Enable **Gmail API**
-2. Create OAuth 2.0 credentials → Download as `credentials.json`
-3. Place `credentials.json` in the project root
-4. Run:
+Get your free Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
-```bash
-python gmail_auth.py
-```
-
-This opens a browser for authorization and creates `token.json`.
-
-### 3. Set up Gemini API keys
-
-Get keys at [Google AI Studio](https://aistudio.google.com/app/apikey).
-
-Copy `.env.example` to `.env` and fill in your key(s):
-
+Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
 
+Add your keys to `.env`:
 ```env
-GEMINI_API_KEY_1=your_key_here
-GEMINI_API_KEY_2=optional_second_key
-GEMINI_API_KEY_3=optional_third_key
+GEMINI_API_KEY_1=AIzaSy...
+GEMINI_API_KEY_2=AIzaSy... (optional backup key)
+GEMINI_API_KEY_3=AIzaSy... (optional backup key)
 ```
 
-> **Note:** If all keys are from the same Google Cloud project, quota is shared at the project level. Keys from different projects give independent quotas.
+### 3. Google Cloud OAuth Setup (Permanent Mode)
 
-### 4. Build email index (for semantic search)
+1. In [Google Cloud Console](https://console.cloud.google.com), create a project and enable **Gmail API**.
+2. Go to **OAuth Consent Screen**:
+   - Set User Type to **External**.
+   - Click **"Publish App"** (moves publishing status from *Testing* to *In Production* so tokens never expire).
+3. Create **OAuth 2.0 Client ID (Desktop Application)** → Download as `credentials.json` into project root.
+4. Run one-time authentication:
+   ```bash
+   python gmail_auth.py
+   ```
+   *This saves your permanent production token in `token.json`.*
+
+### 4. Build Semantic Vector Index
 
 ```bash
 python email_indexer.py
 ```
+*Embeds recent emails with 3072-dimensional Gemini vectors into `email_embeddings.json`. Subsequent runs are incremental and only index new emails.*
 
-This fetches your 50 most recent inbox emails and embeds them using Gemini `text-embedding-004` (768-dim). Only new emails are embedded on subsequent runs.
+---
 
-### 5. Run the Web UI Dashboard (Recommended)
+## 💻 Running the Application
+
+### Option 1: Modern Web UI Dashboard (Recommended)
 
 ```bash
+source avkve/bin/activate
 python web_server.py
 ```
-Open your browser at **`http://127.0.0.1:8000`**.
+👉 Open **`http://127.0.0.1:8000`** in your browser.
 
-Features available in the Web UI:
-- 💬 **AI Agent Chat & Tool Tracing**: Real-time tool execution logs with arguments and in-chat safety confirmation cards.
-- 📥 **Smart Inbox & Reader Drawer**: Filter unread, starred, today's emails, and view complete email content with quick actions.
-- 🏷️ **Gemini Categorizer & Bulk Cleaner**: Group today's emails (Jobs, Finance, Promotions, Social, etc.) and bulk trash unwanted newsletters.
-- 🔍 **Semantic Vector Search Studio**: Concept-based search with cosine similarity match percentage meters.
+#### Web Dashboard Panels:
+1. 💬 **AI Agent Chat**: Real-time tool execution logs, quick prompt chips, and in-chat delete confirmation cards.
+2. 📥 **Smart Inbox**: Search bar supporting Gmail queries (`is:unread`, `from:`, `subject:`), quick filters, and sliding Email Reader drawer.
+3. 🏷️ **Gemini Categorizer**: Visual grid grouping today's emails with multi-select checkboxes to bulk clean clutter.
+4. 🔍 **Semantic Search Studio**: Vector similarity search with percentage match meters and one-click index sync.
 
-### 6. Run via CLI (Optional)
+---
+
+### Option 2: Command Line Interface (CLI)
 
 ```bash
+source avkve/bin/activate
 python gmail_agent.py
 ```
 
----
-
-## Usage Examples
-
-```
-Ask your Gmail agent: Find emails from Indeed
-Ask your Gmail agent: Show unread emails
-Ask your Gmail agent: Read the Adobe hackathon email
-Ask your Gmail agent: Mark the testing with vijay email as read
-Ask your Gmail agent: Find emails related to AI internships
-Ask your Gmail agent: Give me an inbox overview
-Ask your Gmail agent: Summarize my job emails
-Ask your Gmail agent: Delete the testing email
-```
-
-> For deletion, the agent will show you the email details and ask for confirmation before deleting. Type `yes` to confirm or `no` to cancel.
+Example commands:
+- `Show unread emails`
+- `Find emails from Indeed`
+- `Read the Adobe hackathon email`
+- `Categorize today's emails`
+- `Delete all promotional emails from today` *(prompts for confirmation)*
+- `Find emails related to machine learning internships` *(uses semantic vector search)*
 
 ---
 
-## Testing
-
-Run tests in this order:
+### Option 3: Bulk Categorize & Delete Script
 
 ```bash
-# 1. Test Gmail connection
-python gmail_service.py
-
-# 2. Test Gmail search
-python test_tool.py
-python test_search.py
-
-# 3. Test read and mark-read
-python test_read_tool.py
-python test_mark_read.py
-
-# 4. Test Gemini connection
-python test_gemini_chat.py
-
-# 5. Test Gemini tool calling
-python test_gemini_tools.py
-
-# 6. Test semantic search (after indexing)
-python test_semantic_tool.py
-
-# 7. Run full agent
-python gmail_agent.py
+python categorize_and_delete.py
 ```
+*Fetches today's emails, categorizes them with Gemini, displays grouped numbered lists, and lets you select whole categories or individual emails to review and trash.*
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 AIGmailAgent/
 │
-├── web_server.py           # FastAPI Web Server (REST API + Static files)
-├── static/                 # Modern Web UI Dashboard
-│   ├── index.html          # SPA HTML (Chat, Inbox, Categorizer, Search)
-│   ├── style.css           # Modern Glassmorphic Dark Design System
-│   └── app.js              # Interactive UI & Execution Logic
+├── web_server.py             # FastAPI backend (REST API + static file server)
+├── static/                   # Web UI Single Page Application
+│   ├── index.html            # Dashboard layout (Chat, Inbox, Categorizer, Search)
+│   ├── style.css             # Modern glassmorphic dark design system
+│   └── app.js                # Frontend state, API integration & UI logic
 │
-├── gmail_agent.py          # CLI AI Agent (Gemini + controlled tool loop)
-├── gemini_client.py        # Gemini LLM/embedding factory + key fallback
+├── gmail_agent.py            # CLI AI Agent with controlled tool execution loop
+├── gemini_client.py          # Gemini LLM/Embedding client with model & key fallback
 │
-├── gmail_auth.py           # OAuth authentication (run once)
-├── gmail_service.py        # Gmail API service factory
-├── gmail_tools.py          # All Gmail LangChain tools
-├── read_emails.py          # Gmail email reading/parsing utilities
+├── gmail_auth.py             # One-time OAuth credentials setup script
+├── gmail_service.py          # Gmail API connection factory & token auto-refresher
+├── gmail_tools.py            # LangChain Gmail Tools (search, read, star, delete, etc.)
+├── read_emails.py            # Email parsing, HTML cleaner & local IST date formatter
 │
-├── email_indexer.py        # Build/update semantic search index
-├── semantic_search_tool.py # Semantic email search (Gemini embeddings)
+├── email_indexer.py          # Incremental vector indexer (3072-dim embeddings)
+├── semantic_search_tool.py   # Semantic search tool (cosine similarity)
 │
-├── categorize_and_delete.py# CLI Categorizer & Safe Bulk Trash Tool
-├── email_ai.py             # Single-email AI analysis
-├── ai_email_agent.py       # Simple batch email analyzer
+├── categorize_and_delete.py  # Standalone CLI categorizer & bulk cleaner
+├── email_ai.py               # Single email analysis helper
+├── ai_email_agent.py         # Batch email analysis script
 │
-├── .env.example            # Environment variable template
-├── .gitignore              # Excludes credentials, .env, embeddings
-│
-└── avkve/                  # Python virtual environment
+├── .env.example              # Template for API keys
+├── .gitignore                # Protects credentials, tokens, .env, index
+└── README.md                 # Project documentation
 ```
 
 ---
 
-## Key Safety Features
+## 🛡️ Safety & Reliability Features
 
-| Feature | Description |
-|---------|-------------|
-| **Duplicate detection** | Stops if Gemini calls the same tool with same args twice |
-| **Message ID validation** | Rejects non-hex strings as message IDs (prevents hallucinated IDs) |
-| **Delete confirmation** | Always asks user to confirm before any deletion (both in UI and CLI) |
-| **Max iterations** | Hard cap of 5 tool calls per request |
-| **Key + model fallback** | On quota errors, tries next model then next key |
-| **No hardcoded secrets** | All keys in `.env`, never in source code |
-
----
-
-## Gemini Models Used
-
-| Purpose | Model |
-|---------|-------|
-| LLM / Agent | `gemini-flash-latest` (primary) with fallbacks |
-| Embeddings | `models/gemini-embedding-001` (3072-dim) |
-
-**Model fallback chain:**
-`gemini-flash-latest` → `gemini-3.5-flash` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest`
+| Feature | Protection Mechanism |
+|---------|----------------------|
+| **Safe Deletions** | All delete operations move emails to **Gmail Trash** (recoverable within 30 days) rather than permanently purging. |
+| **Human-in-the-Loop Confirmation** | Deletions (single or batch) ALWAYS pause and require explicit user confirmation via UI card or CLI prompt. |
+| **Strict Midnight Filter** | "Today's" email queries filter strictly from `00:00:00` local time instead of rolling 24-hour windows. |
+| **Duplicate Tool Detection** | Stops loops immediately if the LLM calls the same tool with identical arguments. |
+| **Message ID Validation** | Rejects natural language or hallucinated IDs, enforcing valid 16-character hexadecimal Gmail IDs. |
+| **Model Fallback Chain** | `gemini-flash-latest` → `gemini-3.5-flash` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest` on quota or 404 errors. |
+| **Loop Limits** | Hard limit of 5 tool iterations per user query to prevent infinite execution. |
 
 ---
 
-## Security
+## 🧠 Gemini Models & Specifications
 
-- `credentials.json` and `token.json` are **never committed** (in `.gitignore`)
-- `.env` is **never committed** (in `.gitignore`)
-- `email_embeddings.json` is **never committed** (contains personal email data)
-- API keys are only loaded from environment variables via `python-dotenv`
-
----
-
-## Gmail Scope
-
-The agent uses `https://www.googleapis.com/auth/gmail.modify` which allows:
-- Reading and searching emails
-- Marking read/unread, starring, archiving
-- Moving to Trash (delete)
-
-It does **not** request `gmail.readonly` (too restrictive) or `gmail.full` (unnecessary).
+- **LLM / Agent**: `gemini-flash-latest` (Primary) with automated fallback chain.
+- **Embedding Model**: `models/gemini-embedding-001` (3072-dimensional vector space).
+- **Gmail Scope**: `https://www.googleapis.com/auth/gmail.modify` (Read, modify labels, move to trash).
