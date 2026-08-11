@@ -357,14 +357,17 @@ CATEGORY_META = {
 
 @app.get("/api/categorize")
 async def categorize_todays_emails(days: int = 1, max_results: int = 25):
-    """Fetch recent emails and categorize them with Gemini into groups."""
+    """Fetch emails received today (since local midnight) and categorize them with Gemini."""
     service = create_gmail_service()
-    query = f"newer_than:{days}d"
+    from datetime import datetime
+    today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    midnight_ts = int(today_midnight.timestamp())
+    query = f"after:{midnight_ts}"
     
     try:
         _, messages = search_emails(query, max_results=max_results)
         if not messages:
-            # Fallback to general latest if no emails in last 24h
+            # Fallback to general latest if no emails yet today
             _, messages = search_emails("label:INBOX", max_results=15)
 
         emails = []

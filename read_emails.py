@@ -218,6 +218,19 @@ def get_latest_emails(max_results=5):
     return service, messages
 
 
+def format_local_date(raw_date: str) -> str:
+    """Convert raw RFC 2822 email date to a readable local timezone string."""
+    if not raw_date:
+        return ""
+    import email.utils
+    try:
+        dt = email.utils.parsedate_to_datetime(raw_date)
+        local_dt = dt.astimezone()
+        return local_dt.strftime("%a, %d %b %Y, %I:%M %p %Z")
+    except Exception:
+        return raw_date
+
+
 def get_email_details(
     service,
     message_id
@@ -227,11 +240,7 @@ def get_email_details(
 
     Returns:
         Dictionary containing:
-        id
-        sender
-        subject
-        date
-        body
+        id, sender, subject, date, raw_date, body
     """
 
     message = service.users().messages().get(
@@ -240,38 +249,17 @@ def get_email_details(
         format="full"
     ).execute()
 
-    payload = message.get(
-        "payload",
-        {}
-    )
-
-    headers = payload.get(
-        "headers",
-        []
-    )
+    payload = message.get("payload", {})
+    headers = payload.get("headers", [])
+    raw_date = get_header(headers, "Date")
 
     email_data = {
-
         "id": message_id,
-
-        "sender": get_header(
-            headers,
-            "From"
-        ),
-
-        "subject": get_header(
-            headers,
-            "Subject"
-        ),
-
-        "date": get_header(
-            headers,
-            "Date"
-        ),
-
-        "body": extract_body(
-            payload
-        )
+        "sender": get_header(headers, "From"),
+        "subject": get_header(headers, "Subject"),
+        "date": format_local_date(raw_date),
+        "raw_date": raw_date,
+        "body": extract_body(payload)
     }
 
     return email_data

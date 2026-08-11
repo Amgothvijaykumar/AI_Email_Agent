@@ -376,12 +376,17 @@ def get_inbox_overview() -> str:
         ).execute()
         unread_est = unread_result.get("resultSizeEstimate", 0)
 
-        # ---- Today's emails (last 24 hours) ----
+        # ---- Today's emails (since midnight 00:00 local time) ----
+        from datetime import datetime
+        today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight_ts = int(today_midnight.timestamp())
+        today_query = f"after:{midnight_ts}"
+
         today_result = service.users().messages().list(
             userId="me",
             labelIds=["INBOX"],
-            q="newer_than:1d",
-            maxResults=20,
+            q=today_query,
+            maxResults=25,
         ).execute()
 
         today_messages = today_result.get("messages", [])
